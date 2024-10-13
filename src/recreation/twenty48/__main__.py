@@ -3,7 +3,7 @@ import random
 
 import pyglet
 
-TILE_SIZE = 88
+TILE_SIZE = 100
 TILE_MARGIN = 6
 TILE_FONT_SIZE = 24
 UI_HEIGHT = 100
@@ -18,7 +18,7 @@ ANIMATION_DURATION_MS = {
     "merge": 150,
 }
 
-pyglet.font.add_file("res/FiraMono-Regular.ttf")
+pyglet.resource.add_font("res/FiraMono-Regular.ttf")
 
 window = pyglet.window.Window(WIDTH, HEIGHT, caption="2048")
 pyglet.gl.glClearColor(0.9, 0.9, 0.9, 1)
@@ -110,6 +110,7 @@ class Game:
                     merged_tile = Tile(tile.n * 2, self.batch)
 
                     self.tiles[row, col].animate_move((merge_row, merge_col))
+                    merged_tile.hide()
                     self.pending.append((merged_tile.show, merged_tile.animate_merge, (merge_row, merge_col)))
                     self.merged_tiles += [self.tiles[row, col], self.tiles[merge_row, merge_col]]
 
@@ -134,6 +135,7 @@ class Game:
 
         if effective:
             pos, tile = self.new_tile()
+            tile.hide()
             if len(self.tiles) == 4 * 4:
                 raise AssertionError("game over")  # TODO: ending scene  # noqa: TRY003, EM101
             self.pending.append((tile.show, tile.animate_enter, pos))
@@ -142,15 +144,11 @@ class Game:
 
 def shape_pos(pos):
     row, col = pos
-    return TILE_FULL_SIZE * col + TILE_MARGIN + TILE_SIZE / 2, TILE_FULL_SIZE * row + TILE_MARGIN + TILE_SIZE / 2
-
-
-def color(h):
-    return tuple(int(h[i : i + 2], 16) for i in range(1, 6, 2))
+    return TILE_FULL_SIZE * col + TILE_MARGIN, TILE_FULL_SIZE * row + TILE_MARGIN, 0
 
 
 COLOR_MAP = {
-    1 << (i + 1): color(h)
+    1 << (i + 1): h
     for i, h in enumerate(
         [
             "#1f77b4",
@@ -168,10 +166,30 @@ COLOR_MAP = {
 }
 
 
+def tile_shape_image(shape_image, color):
+    from io import BytesIO
+
+    from PIL import Image
+
+    shape_im = Image.open(shape_image)
+    color_im = Image.new("RGBA", shape_im.size, color=color)
+    im = Image.new("RGBA", shape_im.size, color=(0, 0, 0, 0))
+    im.paste(color_im, mask=shape_im)
+    buf = BytesIO()
+    im.save(buf, format="png")
+    return pyglet.image.load("shape.png", buf)
+
+
+tile_image = pyglet.resource.file("res/TileShape.png")
+tile_shape_images = {n: tile_shape_image(tile_image, color) for n, color in COLOR_MAP.items()}
+tile_shape_image_fallback = tile_shape_image(tile_image, "#111")
+
+
 class Tile:
     def __init__(self, n, batch):
         self.n = n
-        self.shape = pyglet.shapes.Rectangle(0, 0, 0, 0, color=COLOR_MAP.get(n, (16, 16, 16)), batch=batch)
+        # self.shape = pyglet.shapes.Rectangle(0, 0, 0, 0, color=COLOR_MAP.get(n, (16, 16, 16)), batch=batch)
+        self.shape = pyglet.sprite.Sprite(tile_shape_images.get(n), batch=batch, subpixel=True)
         self.text = pyglet.text.Label(str(n), font_name="Fira Mono", anchor_x="center", anchor_y="center", batch=batch)
         self.animation = None
 
@@ -192,16 +210,18 @@ class Tile:
 
     def animate_enter(self, pos):
         assert self.animation is None
-        self.animation = {"type": "enter", "step": 0}
-        self.shape.position = shape_pos(pos)
+        pos = shape_pos(pos)
+        x, y, z = pos
+        self.shape.position = (x + TILE_SIZE / 2, y + TILE_SIZE / 2, z)
         self.shape.width = self.shape.height = 0
         self.text.x = self.shape.x
         self.text.y = self.shape.y
         self.text.font_size = 0
+        self.animation = {"type": "enter", "step": 0, "shape_pos": pos}
 
     def animate_move(self, pos):
         assert self.animation is None
-        x, y = shape_pos(pos)
+        x, y, _z = shape_pos(pos)
         x_offset, y_offset = x - self.shape.x, y - self.shape.y
         self.animation = {
             "type": "move",
@@ -213,11 +233,12 @@ class Tile:
 
     def animate_merge(self, pos):
         assert self.animation is None
-        self.shape.position = shape_pos(pos)
-        self.shape.anchor_position = (TILE_SIZE / 2, TILE_SIZE / 2)
-        self.text.x = self.shape.x
-        self.text.y = self.shape.y
-        self.animation = {"type": "merge", "step": 0}
+        pos = shape_pos(pos)
+        self.shape.position = pos
+        # self.shape.anchor_position = (TILE_SIZE / 2, TILE_SIZE / 2)
+        self.text.x = self.shape.x + TILE_SIZE / 2
+        self.text.y = self.shape.y + TILE_SIZE / 2
+        self.animation = {"type": "merge", "step": 0, "shape_pos": pos}
 
     def update(self, dt):
         if self.animation is None:
@@ -227,19 +248,24 @@ class Tile:
         step = min(self.animation["step"] + dt / (ANIMATION_DURATION_MS[ty] / 1000), 1)
         match ty:
             case "enter":
-                self.shape.anchor_position = (TILE_SIZE / 2 * step, TILE_SIZE / 2 * step)
+                x, y, z = self.animation["shape_pos"]
+                offset = TILE_SIZE / 2 * (1 - step)
+                self.shape.position = (x + offset, y + offset, z)
                 self.shape.width = self.shape.height = TILE_SIZE * step
                 self.text.font_size = TILE_FONT_SIZE * step
             case "move":
                 x_offset, y_offset = self.animation["pos_offset"]
-                x, y = self.animation["shape_pos"]
-                self.shape.position = (x + x_offset * step, y + y_offset * step)
+                x, y, z = self.animation["shape_pos"]
+                self.shape.position = (x + x_offset * step, y + y_offset * step, z)
                 x, y, z = self.animation["text_pos"]
                 self.text.position = (x + x_offset * step, y + y_offset * step, z)
             case "merge":
                 factor = (0.5 - abs(step - 0.5)) / 5  # 0 @ step=0 -> 0.1 @ step=0.5 -> 0 @ step=1
+                offset = -TILE_SIZE / 2 * factor
+                x, y, z = self.animation["shape_pos"]
+                self.shape.position = (x + offset, y + offset, z)
                 tile_size = TILE_SIZE * (1 + factor)
-                self.shape.anchor_position = (tile_size / 2, tile_size / 2)
+                # self.shape.anchor_position = (tile_size / 2, tile_size / 2)
                 self.shape.width = self.shape.height = tile_size
                 self.text.font_size = TILE_FONT_SIZE * (1 + factor)
 
