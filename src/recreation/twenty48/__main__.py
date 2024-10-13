@@ -16,12 +16,14 @@ ANIMATION_DURATION_MS = {
     "enter": 150,
     "move": 150,
     "merge": 150,
+    "over_fade": 2000,
 }
 
 pyglet.resource.add_font("res/FiraMono-Regular.ttf")
 
 window = pyglet.window.Window(WIDTH, HEIGHT, caption="2048")
 pyglet.gl.glClearColor(0.9, 0.9, 0.9, 1)
+# window.set_vsync(True)
 fps_display = pyglet.window.FPSDisplay(window=window)
 
 
@@ -31,12 +33,15 @@ class Game:
         self.tiles = {}
         self.merged_tiles = []
         self.pending = []
+        self.over_batch = pyglet.graphics.Batch()
+        self.over_overlay = OverOverlay(self.over_batch)
 
     def start(self):
         for _ in range(2):
             pos, tile = self.new_tile()
             tile.show()
             tile.animate_enter(pos)
+        self.over_overlay.toggle(False)
 
     def update(self, dt):
         if self.merged_tiles and all(tile.animation is None for tile in self.merged_tiles):
@@ -48,6 +53,11 @@ class Game:
                 show()
                 animate(pos)
             self.pending = []
+
+        self.over_overlay.update(dt)
+        if not self.over_overlay.toggled and not self.animating() and self.over():
+            print("Vegetable")  # noqa: T201
+            self.over_overlay.toggle(True)
         for tile in self.tiles.values():
             tile.update(dt)
         for tile in self.merged_tiles:
@@ -136,10 +146,15 @@ class Game:
         if effective:
             pos, tile = self.new_tile()
             tile.hide()
-            if len(self.tiles) == 4 * 4:
-                raise AssertionError("game over")  # TODO: ending scene  # noqa: TRY003, EM101
             self.pending.append((tile.show, tile.animate_enter, pos))
         print(self.tiles)  # noqa: T201
+
+    def over(self):
+        return len(self.tiles) == 4 * 4 and all(
+            self.tiles[row, col].n not in (self.tiles[row + 1, col].n, self.tiles[row, col + 1].n)
+            for row in range(3)
+            for col in range(3)
+        )
 
 
 def shape_pos(pos):
@@ -150,18 +165,8 @@ def shape_pos(pos):
 COLOR_MAP = {
     1 << (i + 1): h
     for i, h in enumerate(
-        [
-            "#1f77b4",
-            "#ff7f0e",
-            "#2ca02c",
-            "#d62728",
-            "#9467bd",
-            "#8c564b",
-            "#e377c2",
-            "#7f7f7f",
-            "#bcbd22",
-            "#17becf",
-        ]
+        # tab10 from matplotlib
+        ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
     )
 }
 
@@ -275,6 +280,45 @@ class Tile:
             self.animation = None
 
 
+class OverOverlay:
+    def __init__(self, batch):
+        self.shape = pyglet.shapes.Rectangle(0, 0, WIDTH, HEIGHT - UI_HEIGHT, color=(255, 255, 255), batch=batch)
+        self.text = pyglet.text.Label(
+            "Game Over",
+            WIDTH / 2,
+            (HEIGHT - UI_HEIGHT) / 2,
+            anchor_x="center",
+            anchor_y="center",
+            font_name="Fira Mono",
+            font_size=32,
+            color=(0, 0, 0),
+            batch=batch,
+        )
+        self.toggled = False
+        self.animation_step = None
+
+    def toggle(self, visible):
+        self.shape.visible = visible
+        self.text.visible = visible
+        if visible and not self.toggled:
+            self.shape.opacity = 0
+            self.text.opacity = 0
+            self.animation_step = 0
+        self.toggled = visible
+
+    def update(self, dt):
+        if self.animation_step is None:
+            return
+        step = min(self.animation_step + dt / (ANIMATION_DURATION_MS["over_fade"] / 1000), 1)
+        opacity = int(step * 255 * 0.8)
+        self.shape.opacity = opacity
+        self.text.opacity = opacity
+        if step < 1:
+            self.animation_step = step
+        else:
+            self.animation_step = None
+
+
 game = Game()
 game.start()
 
@@ -283,6 +327,7 @@ game.start()
 def on_draw():
     window.clear()
     game.batch.draw()
+    game.over_batch.draw()
     fps_display.draw()
 
 
@@ -290,15 +335,16 @@ def on_draw():
 def on_key_press(symbol, _modifier):
     if game.animating():
         return
-    match symbol:
-        case pyglet.window.key.W:
-            game.slide("up")
-        case pyglet.window.key.A:
-            game.slide("left")
-        case pyglet.window.key.S:
-            game.slide("down")
-        case pyglet.window.key.D:
-            game.slide("right")
+    if not game.over():
+        match symbol:
+            case pyglet.window.key.W:
+                game.slide("up")
+            case pyglet.window.key.A:
+                game.slide("left")
+            case pyglet.window.key.S:
+                game.slide("down")
+            case pyglet.window.key.D:
+                game.slide("right")
 
 
 pyglet.clock.schedule_interval(game.update, 1 / 120)
