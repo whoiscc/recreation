@@ -151,9 +151,10 @@ class Game:
 
     def over(self):
         return len(self.tiles) == 4 * 4 and all(
-            self.tiles[row, col].n not in (self.tiles[row + 1, col].n, self.tiles[row, col + 1].n)
-            for row in range(3)
-            for col in range(3)
+            (row != 0 and self.tiles[row, col].n != self.tiles[row - 1, col].n)
+            or (col != 0 and self.tiles[row, col].n != self.tiles[row, col - 1].n)
+            for row in range(4)
+            for col in range(4)
         )
 
 

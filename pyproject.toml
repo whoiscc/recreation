@@ -68,3 +68,13 @@ ignore = [
   "S101",
   "SIM108",
 ]
+
+[tool.hatch.envs.default.scripts]
+twenty48 = "python3 -m recreation.twenty48"
+
+[tool.hatch.envs.packaging]
+extra-dependencies = [
+  "pyinstaller",
+]
+[tool.hatch.envs.packaging.scripts]
+twenty48 = "pyinstaller src/recreation/twenty48/__main__.py -n twenty48 --specpath src/recreation/twenty48 --add-data res:res"
