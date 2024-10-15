@@ -70,7 +70,7 @@ ignore = [
 ]
 
 [tool.hatch.envs.default.scripts]
-twenty48 = "python3 -m recreation.twenty48"
+twenty48 = "python -m recreation.twenty48"
 
 [tool.hatch.envs.packaging]
 extra-dependencies = [

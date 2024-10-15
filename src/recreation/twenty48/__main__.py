@@ -183,19 +183,35 @@ def tile_shape_image(shape_image, color):
     im.paste(color_im, mask=shape_im)
     buf = BytesIO()
     im.save(buf, format="png")
-    return pyglet.image.load("shape.png", buf)
+    # return pyglet.image.load("shape.png", buf)
+    return buf.getvalue()
 
 
 tile_image = pyglet.resource.file("res/TileShape.png")
 tile_shape_images = {n: tile_shape_image(tile_image, color) for n, color in COLOR_MAP.items()}
-tile_shape_image_fallback = tile_shape_image(tile_image, "#111")
+tile_shape_image_fallback = tile_shape_image(tile_image, "#444")
+
+from tempfile import TemporaryDirectory  # noqa: E402
+
+with TemporaryDirectory() as d:
+    print(d)  # noqa: T201
+
+    def to_image(buf):
+        with open(f"{d}/shape.png", "wb") as shape_file:
+            shape_file.write(buf)
+        return pyglet.image.load(f"{d}/shape.png")
+
+    tile_shape_images = {n: to_image(buf) for n, buf in tile_shape_images.items()}
+    tile_shape_image_fallback = to_image(tile_shape_image_fallback)
 
 
 class Tile:
     def __init__(self, n, batch):
         self.n = n
         # self.shape = pyglet.shapes.Rectangle(0, 0, 0, 0, color=COLOR_MAP.get(n, (16, 16, 16)), batch=batch)
-        self.shape = pyglet.sprite.Sprite(tile_shape_images.get(n), batch=batch, subpixel=True)
+        self.shape = pyglet.sprite.Sprite(
+            tile_shape_images.get(n, tile_shape_image_fallback), batch=batch, subpixel=True
+        )
         self.text = pyglet.text.Label(str(n), font_name="Fira Mono", anchor_x="center", anchor_y="center", batch=batch)
         self.animation = None
 
@@ -222,7 +238,7 @@ class Tile:
         self.shape.width = self.shape.height = 0
         self.text.x = self.shape.x
         self.text.y = self.shape.y
-        self.text.font_size = 0
+        self.text.font_size = 1
         self.animation = {"type": "enter", "step": 0, "shape_pos": pos}
 
     def animate_move(self, pos):
@@ -258,7 +274,7 @@ class Tile:
                 offset = TILE_SIZE / 2 * (1 - step)
                 self.shape.position = (x + offset, y + offset, z)
                 self.shape.width = self.shape.height = TILE_SIZE * step
-                self.text.font_size = TILE_FONT_SIZE * step
+                self.text.font_size = max(TILE_FONT_SIZE * step, 1)
             case "move":
                 x_offset, y_offset = self.animation["pos_offset"]
                 x, y, z = self.animation["shape_pos"]
